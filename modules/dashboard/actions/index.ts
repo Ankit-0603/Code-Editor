@@ -137,7 +137,7 @@ export const duplicateProjectById = async (id: string) => {
 
     const duplicatedPlayground = await db.playground.create({
       data: {
-        title: `${originalPlayground.title} (Copy)`,
+        title: `${originalPlayground.title} (Copy)`, 
         description: originalPlayground.description,
         template: originalPlayground.template,
         userId: originalPlayground.userId,

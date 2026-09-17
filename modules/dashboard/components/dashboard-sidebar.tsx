@@ -63,7 +63,7 @@ export function DashboardSidebar({ initialPlaygroundData }: { initialPlaygroundD
   const [recentPlaygrounds, setRecentPlaygrounds] = useState(initialPlaygroundData)
 
   return (
-    <Sidebar variant="inset" collapsible="icon" className="border-1 border-r">
+    <Sidebar variant="inset" collapsible="icon" className="border border-r">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-4 py-3 justify-center">
           <Image src={"/logo.svg"} alt="logo" height={60} width={60} />
@@ -115,7 +115,7 @@ export function DashboardSidebar({ initialPlaygroundData }: { initialPlaygroundD
                         asChild
                         isActive={pathname === `/playground/${playground.id}`}
                         tooltip={playground.name}
-                      >
+                      > 
                         <Link href={`/playground/${playground.id}`}>
                           {IconComponent && <IconComponent className="h-4 w-4" />}
                           <span>{playground.name}</span>
