@@ -1,4 +1,5 @@
-import "./globals.css"
+import "./globals.css";
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import React from "react";
@@ -43,13 +44,13 @@ export default async function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <div className="flex flex-col min-h-screen" >
-              <Toaster/>
-              <div className="flex-1" >
+            <div className="flex flex-col min-h-screen">
+              <Toaster />
 
+              <div className="flex-1">
+                {children}
               </div>
             </div>
-            {children}
           </ThemeProvider>
         </SessionProvider>
       </body>
