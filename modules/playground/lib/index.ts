@@ -1,47 +1,69 @@
-import { TemplateFile, TemplateFolder } from "./path-to-json";
+import type { TemplateFile, TemplateFolder } from "./path-to-json";
 
-export function findFilePath(
-  file: TemplateFile,
+/** "index.js", or just "Dockerfile" for files without an extension. */
+export function getFileName(file: Pick<TemplateFile, "filename" | "fileExtension">): string {
+  const ext = file.fileExtension?.trim();
+  return ext ? `${file.filename}.${ext}` : file.filename;
+}
+
+function searchPath(
   folder: TemplateFolder,
-  pathSoFar: string[] = []
+  matches: (item: TemplateFile) => boolean,
+  pathSoFar: string[]
 ): string | null {
   for (const item of folder.items) {
     if ("folderName" in item) {
-      const res = findFilePath(file, item, [...pathSoFar, item.folderName]);
+      const res = searchPath(item, matches, [...pathSoFar, item.folderName]);
       if (res) return res;
-    } else {
-      if (
-        item.filename === file.filename &&
-        item.fileExtension === file.fileExtension
-      ) {
-        return [
-          ...pathSoFar,
-          item.filename + (item.fileExtension ? "." + item.fileExtension : ""),
-        ].join("/");
-      }
+    } else if (matches(item)) {
+      return [...pathSoFar, getFileName(item)].join("/");
     }
   }
   return null;
 }
 
-
+/**
+ * Full path of a file inside the template, e.g. "pages/index.html".
+ *
+ * Looks for the exact same object first, so two files with the same name in
+ * different folders (e.g. "index.js" and "src/index.js") are told apart.
+ * Falls back to matching by name for copies of the file object.
+ */
+export function findFilePath(file: TemplateFile, folder: TemplateFolder): string | null {
+  return (
+    searchPath(folder, (item) => item === file, []) ??
+    searchPath(
+      folder,
+      (item) =>
+        item.filename === file.filename && item.fileExtension === file.fileExtension,
+      []
+    )
+  );
+}
 
 /**
- * Generates a unique file ID based on file location in folder structure
- * @param file The template file
- * @param rootFolder The root template folder containing all files
- * @returns A unique file identifier including full path
+ * Unique ID of a file: its full path, e.g. "pages/index.html".
+ * (The old version appended the name twice: "pages/index.html/index.html".)
  */
 export const generateFileId = (file: TemplateFile, rootFolder: TemplateFolder): string => {
-  // Find the file's path in the folder structure
-  const path = findFilePath(file, rootFolder)?.replace(/^\/+/, '') || '';
-  
-  // Handle empty/undefined file extension
-  const extension = file.fileExtension?.trim();
-  const extensionSuffix = extension ? `.${extension}` : '';
+  return findFilePath(file, rootFolder)?.replace(/^\/+/, "") || getFileName(file);
+};
 
-  // Combine path and filename
-  return path
-    ? `${path}/${file.filename}${extensionSuffix}`
-    : `${file.filename}${extensionSuffix}`;
+/** Returns a copy of the tree with the file at `filePath` given new content. */
+export function updateFileContentAtPath(
+  root: TemplateFolder,
+  filePath: string,
+  content: string
+): TemplateFolder {
+  const update = (folder: TemplateFolder, prefix: string): TemplateFolder => ({
+    ...folder,
+    items: folder.items.map((item) => {
+      if ("folderName" in item) {
+        return update(item, prefix ? `${prefix}/${item.folderName}` : item.folderName);
+      }
+      const itemPath = prefix ? `${prefix}/${getFileName(item)}` : getFileName(item);
+      return itemPath === filePath ? { ...item, content } : item;
+    }),
+  });
+  return update(root, "");
 }

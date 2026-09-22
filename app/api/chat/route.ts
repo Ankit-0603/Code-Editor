@@ -9,7 +9,7 @@ interface ChatMessage {
 
 interface ChatRequest {
   message: string;
-  history: ChatMessage[];
+  history: ChatMessage[]; //everytime we have to give cat history to llm
 }
 
 async function generateAIResponse(messages: ChatMessage[]): Promise<string> {

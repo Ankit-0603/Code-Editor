@@ -28,8 +28,8 @@ import ToggleAI from "@/modules/playground/components/toggle-ai";
 import { useAISuggestions } from "@/modules/playground/hooks/useAISuggestion";
 import { useFileExplorer } from "@/modules/playground/hooks/useFileExplorer";
 import { usePlayground } from "@/modules/playground/hooks/usePlayground";
-import { findFilePath } from "@/modules/playground/lib";
-import {
+import { getFileName, updateFileContentAtPath } from "@/modules/playground/lib";
+import type {
   TemplateFile,
   TemplateFolder,
 } from "@/modules/playground/lib/path-to-json";
@@ -178,95 +178,66 @@ const MainPlaygroundPage = () => {
 
   const handleSave = useCallback(
     async (fileId?: string) => {
-      const targetFileId = fileId || activeFileId;
-      if (!targetFileId) return;
+      // Read the latest store state (not the render-time `openFiles`), so
+      // "Save All" never works from a stale list
+      const { openFiles: currentFiles, activeFileId: currentActiveId, templateData: latestTemplateData } =
+        useFileExplorer.getState();
 
-      const fileToSave = openFiles.find((f) => f.id === targetFileId);
+      const targetFileId = fileId || currentActiveId;
+      if (!targetFileId || !latestTemplateData) return;
 
+      const fileToSave = currentFiles.find((f) => f.id === targetFileId);
       if (!fileToSave) return;
 
-      const latestTemplateData = useFileExplorer.getState().templateData;
-      if (!latestTemplateData) return
-
       try {
-            const filePath = findFilePath(fileToSave, latestTemplateData);
-        if (!filePath) {
-          toast.error(
-            `Could not find path for file: ${fileToSave.filename}.${fileToSave.fileExtension}`
-          );
-          return;
-        }
+        // A file's ID is its full path (e.g. "pages/index.html"), so files
+        // with the same name in different folders are never mixed up.
+        const filePath = fileToSave.id;
 
-   const updatedTemplateData = JSON.parse(
-          JSON.stringify(latestTemplateData)
+        const updatedTemplateData = updateFileContentAtPath(
+          latestTemplateData,
+          filePath,
+          fileToSave.content
         );
 
-        // @ts-ignore
-          const updateFileContent = (items: any[]) =>
-            // @ts-ignore
-          items.map((item) => {
-            if ("folderName" in item) {
-              return { ...item, items: updateFileContent(item.items) };
-            } else if (
-              item.filename === fileToSave.filename &&
-              item.fileExtension === fileToSave.fileExtension
-            ) {
-              return { ...item, content: fileToSave.content };
-            }
-            return item;
-          });
-        updatedTemplateData.items = updateFileContent(
-          updatedTemplateData.items
-        );
-
-          // Sync with WebContainer
+        // Sync with WebContainer
         if (writeFileSync) {
           await writeFileSync(filePath, fileToSave.content);
           lastSyncedContent.current.set(fileToSave.id, fileToSave.content);
-          if (instance && instance.fs) {
-            await instance.fs.writeFile(filePath, fileToSave.content);
-          }
         }
 
-           const newTemplateData = await saveTemplateData(updatedTemplateData);
-        setTemplateData(newTemplateData || updatedTemplateData);
-// Update open files
-        const updatedOpenFiles = openFiles.map((f) =>
-          f.id === targetFileId
-            ? {
-                ...f,
-                content: fileToSave.content,
-                originalContent: fileToSave.content,
-                hasUnsavedChanges: false,
-              }
-            : f
-        );
-        setOpenFiles(updatedOpenFiles);
+        // saveTemplateData returns nothing (Promise<void>), so use the data we built
+        await saveTemplateData(updatedTemplateData);
+        setTemplateData(updatedTemplateData);
 
-    toast.success(
-          `Saved ${fileToSave.filename}.${fileToSave.fileExtension}`
+        // Update open files from the latest state
+        setOpenFiles(
+          useFileExplorer.getState().openFiles.map((f) =>
+            f.id === targetFileId
+              ? {
+                  ...f,
+                  content: fileToSave.content,
+                  originalContent: fileToSave.content,
+                  hasUnsavedChanges: f.content !== fileToSave.content,
+                }
+              : f
+          )
         );
+
+        toast.success(`Saved ${getFileName(fileToSave)}`);
       } catch (error) {
-         console.error("Error saving file:", error);
-        toast.error(
-          `Failed to save ${fileToSave.filename}.${fileToSave.fileExtension}`
-        );
+        console.error("Error saving file:", error);
+        toast.error(`Failed to save ${getFileName(fileToSave)}`);
         throw error;
       }
     },
-    [
-      activeFileId,
-      openFiles,
-      writeFileSync,
-      instance,
-      saveTemplateData,
-      setTemplateData,
-      setOpenFiles,
-    ]
+    [writeFileSync, saveTemplateData, setTemplateData, setOpenFiles]
   );
 
-    const handleSaveAll = async () => {
-    const unsavedFiles = openFiles.filter((f) => f.hasUnsavedChanges);
+  const handleSaveAll = useCallback(async () => {
+    const unsavedFiles = useFileExplorer
+      .getState()
+      .openFiles.filter((f) => f.hasUnsavedChanges);
 
     if (unsavedFiles.length === 0) {
       toast.info("No unsaved changes");
@@ -274,24 +245,32 @@ const MainPlaygroundPage = () => {
     }
 
     try {
-      await Promise.all(unsavedFiles.map((f) => handleSave(f.id)));
+      // One at a time: each save builds on the tree the previous one saved.
+      // In parallel (Promise.all) they overwrote each other and lost changes.
+      for (const f of unsavedFiles) {
+        await handleSave(f.id);
+      }
       toast.success(`Saved ${unsavedFiles.length} file(s)`);
-    } catch (error) {
+    } catch {
       toast.error("Failed to save some files");
     }
-  };
+  }, [handleSave]);
 
-
-  useEffect(()=>{
-    const handleKeyDown = (e:KeyboardEvent)=>{
-      if(e.ctrlKey && e.key === "s"){
-        e.preventDefault()
-        handleSave()
+  // Ctrl+S / Cmd+S saves, Ctrl+Shift+S / Cmd+Shift+S saves all
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          void handleSaveAll();
+        } else {
+          handleSave().catch(() => {});
+        }
       }
-    }
-     window.addEventListener("keydown", handleKeyDown);
-     return () => window.removeEventListener("keydown", handleKeyDown);
-  },[handleSave]);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSave, handleSaveAll]);
 
   if (error) {
     return (
@@ -356,6 +335,7 @@ const MainPlaygroundPage = () => {
           data={templateData!}
           onFileSelect={handleFileSelect}
           selectedFile={activeFile}
+          selectedFileId={activeFileId}
           title="File Explorer"
           onAddFile={wrappedHandleAddFile}
           onAddFolder={wrappedHandleAddFolder}
@@ -382,7 +362,7 @@ const MainPlaygroundPage = () => {
 
               <div className="flex items-center gap-1">
                 <Tooltip>
-                  <TooltipTrigger>
+                  <TooltipTrigger asChild>
                     <Button
                       size="sm"
                       variant="outline"
@@ -490,10 +470,10 @@ const MainPlaygroundPage = () => {
                 </div>
                 <div className="flex-1">
                   <ResizablePanelGroup
-                    direction="horizontal"
+                    orientation="horizontal"
                     className="h-full"
                   >
-                    <ResizablePanel defaultSize={isPreviewVisible ? 50 : 100}>
+                    <ResizablePanel defaultSize={isPreviewVisible ? "50%" : "100%"}>
                       <PlaygroundEditor
                         activeFile={activeFile}
                         content={activeFile?.content || ""}
@@ -517,14 +497,14 @@ const MainPlaygroundPage = () => {
                     {isPreviewVisible && (
                       <>
                         <ResizableHandle />
-                        <ResizablePanel defaultSize={50}>
+                        <ResizablePanel defaultSize="50%">
                           <WebContainerPreview
                             templateData={templateData}
                             instance={instance}
                             writeFileSync={writeFileSync}
                             isLoading={containerLoading}
                             error={containerError}
-                            serverUrl={serverUrl!}
+                            serverUrl={serverUrl}
                             forceResetup={false}
                           />
                         </ResizablePanel>

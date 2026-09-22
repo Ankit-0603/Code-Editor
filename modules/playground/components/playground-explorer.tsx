@@ -47,24 +47,23 @@ import NewFileDialog from "./dialogs/new-file-dialog";
 import RenameFileDialog from "./dialogs/rename-file-dialog";
 import { DeleteDialog } from "./dialogs/delete-dialog";
 
-interface TemplateFile {
-  filename: string;
-  fileExtension: string;
-  content: string;
-}
+import type {
+  TemplateFile,
+  TemplateFolder,
+  TemplateItem,
+} from "@/modules/playground/lib/path-to-json";
+import { getFileName } from "@/modules/playground/lib";
 
-
-interface TemplateFolder {
-  folderName: string;
-  items: (TemplateFile | TemplateFolder)[];
-}
-
-type TemplateItem = TemplateFile | TemplateFolder;
+/** Stable React key: the item's name (unique within its folder). */
+const itemKey = (item: TemplateItem) =>
+  "folderName" in item ? `folder:${item.folderName}` : `file:${getFileName(item)}`;
 
 interface TemplateFileTreeProps {
   data: TemplateItem;
   onFileSelect?: (file: TemplateFile) => void;
   selectedFile?: TemplateFile;
+  /** ID (= full path) of the active file, e.g. "pages/index.html" */
+  selectedFileId?: string | null;
   title?: string;
   onAddFile?: (file: TemplateFile, parentPath: string) => void;
   onAddFolder?: (folder: TemplateFolder, parentPath: string) => void;
@@ -87,6 +86,7 @@ export function TemplateFileTree({
   data,
   onFileSelect,
   selectedFile,
+  selectedFileId,
   title = "Files Explorer",
   onAddFile,
   onAddFolder,
@@ -156,12 +156,13 @@ export function TemplateFileTree({
           <SidebarGroupContent>
             <SidebarMenu>
               {isRootFolder ? (
-                (data as TemplateFolder).items.map((child, index) => (
+                (data as TemplateFolder).items.map((child) => (
                   <TemplateNode
-                    key={index}
+                    key={itemKey(child)}
                     item={child}
                     onFileSelect={onFileSelect}
                     selectedFile={selectedFile}
+                    selectedFileId={selectedFileId}
                     level={0}
                     path=""
                     onAddFile={onAddFile}
@@ -177,6 +178,7 @@ export function TemplateFileTree({
                   item={data}
                   onFileSelect={onFileSelect}
                   selectedFile={selectedFile}
+                  selectedFileId={selectedFileId}
                   level={0}
                   path=""
                   onAddFile={onAddFile}
@@ -212,6 +214,7 @@ interface TemplateNodeProps {
   item: TemplateItem;
   onFileSelect?: (file: TemplateFile) => void;
   selectedFile?: TemplateFile;
+  selectedFileId?: string | null;
   level: number;
   path?: string;
   onAddFile?: (file: TemplateFile, parentPath: string) => void;
@@ -235,6 +238,7 @@ function TemplateNode({
   item,
   onFileSelect,
   selectedFile,
+  selectedFileId,
   level,
   path = "",
   onAddFile,
@@ -257,12 +261,16 @@ function TemplateNode({
 
   if (!isFolder) {
     const file = item as TemplateFile;
-    const fileName = `${file.filename}.${file.fileExtension}`;
+    const fileName = getFileName(file);
+    const filePath = path ? `${path}/${fileName}` : fileName;
 
-    const isSelected =
-      selectedFile &&
-      selectedFile.filename === file.filename &&
-      selectedFile.fileExtension === file.fileExtension;
+    // Compare full paths, so "index.js" and "src/index.js" aren't both highlighted.
+    // Falls back to name matching if no ID is passed.
+    const isSelected = selectedFileId
+      ? selectedFileId === filePath
+      : !!selectedFile &&
+        selectedFile.filename === file.filename &&
+        selectedFile.fileExtension === file.fileExtension;
 
     const handleRename = () => {
       setIsRenameDialogOpen(true);
@@ -449,12 +457,13 @@ function TemplateNode({
 
           <CollapsibleContent>
             <SidebarMenuSub>
-              {folder.items.map((childItem, index) => (
+              {folder.items.map((childItem) => (
                 <TemplateNode
-                  key={index}
+                  key={itemKey(childItem)}
                   item={childItem}
                   onFileSelect={onFileSelect}
                   selectedFile={selectedFile}
+                  selectedFileId={selectedFileId}
                   level={level + 1}
                   path={currentPath}
                   onAddFile={onAddFile}

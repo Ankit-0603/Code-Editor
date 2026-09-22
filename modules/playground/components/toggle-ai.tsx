@@ -13,17 +13,7 @@ import {
 
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Bot, 
-  Code, 
-  FileText, 
-  Import, 
-  Loader2,
-  Power,
-  PowerOff,
-  Braces,
-  Variable
-} from "lucide-react";
+import { Bot, FileText, Loader2, Power, PowerOff } from "lucide-react";
 import React from "react";
 import { cn } from "@/lib/utils";
 import { AIChatSidePanel } from "@/modules/ai-chat/components/ai-chat-sidebarpanel";
@@ -63,7 +53,6 @@ const ToggleAI: React.FC<ToggleAIProps> = ({
                 : "bg-background hover:bg-accent text-foreground border-border",
               suggestionLoading && "opacity-75"
             )}
-            onClick={(e) => e.preventDefault()}
           >
             {suggestionLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -167,11 +156,10 @@ const ToggleAI: React.FC<ToggleAIProps> = ({
         </DropdownMenuContent>
       </DropdownMenu>
 
-<AIChatSidePanel
-isOpen={isChatOpen}
-onClose={() => setIsChatOpen(false)}
-
-/>
+      <AIChatSidePanel
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+      />
     </>
   );
 };

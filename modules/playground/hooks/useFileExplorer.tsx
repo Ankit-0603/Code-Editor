@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 
-import { TemplateFile, TemplateFolder } from "../lib/path-to-json";
+import type { TemplateFile, TemplateFolder } from "../lib/path-to-json";
 
-import { generateFileId } from "../lib";
+import { generateFileId, getFileName } from "../lib";
 
-interface OpenFile extends TemplateFile {
+export interface OpenFile extends TemplateFile {
   id: string;
   hasUnsavedChanges: boolean;
   content: string;
@@ -74,11 +74,10 @@ interface FileExplorerState {
   updateFileContent: (fileId: string, content: string) => void;
 }
 
-// @ts-ignore
 export const useFileExplorer = create<FileExplorerState>((set, get) => ({
   templateData: null,
   playgroundId: "",
-  openFiles: [] satisfies OpenFile[],
+  openFiles: [],
   activeFileId: null,
   editorContent: "",
 
@@ -170,7 +169,7 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
 
       currentFolder.items.push(newFile);
       set({ templateData: updatedTemplateData });
-      toast.success(`Created file: ${newFile.filename}.${newFile.fileExtension}`);
+      toast.success(`Created file: ${getFileName(newFile)}`);
 
       // Use the passed saveTemplateData function
       await saveTemplateData(updatedTemplateData);
@@ -178,8 +177,8 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
       // Sync with web container
       if (writeFileSync) {
         const filePath = parentPath
-          ? `${parentPath}/${newFile.filename}.${newFile.fileExtension}`
-          : `${newFile.filename}.${newFile.fileExtension}`;
+          ? `${parentPath}/${getFileName(newFile)}`
+          : getFileName(newFile);
         await writeFileSync(filePath, newFile.content || "");
       }
 
@@ -269,7 +268,7 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
 
       // Use the passed saveTemplateData function
       await saveTemplateData(updatedTemplateData);
-      toast.success(`Deleted file: ${file.filename}.${file.fileExtension}`);
+      toast.success(`Deleted file: ${getFileName(file)}`);
     } catch (error) {
       console.error("Error deleting file:", error);
       toast.error("Failed to delete file");
@@ -340,8 +339,9 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
 
     // Generate old and new file IDs using the same logic as openFile
     const oldFileId = generateFileId(file, templateData);
-    const newFile = { ...file, filename: newFilename, fileExtension: newExtension };
-    const newFileId = generateFileId(newFile, templateData);
+    // The renamed file isn't in the tree yet, so build its ID (= path) from parentPath
+    const newName = getFileName({ filename: newFilename, fileExtension: newExtension });
+    const newFileId = parentPath ? `${parentPath}/${newName}` : newName;
 
     try {
       const updatedTemplateData = JSON.parse(
@@ -394,7 +394,7 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
 
         // Use the passed saveTemplateData function
         await saveTemplateData(updatedTemplateData);
-        toast.success(`Renamed file to: ${newFilename}.${newExtension}`);
+        toast.success(`Renamed file to: ${newName}`);
       }
     } catch (error) {
       console.error("Error renaming file:", error);
@@ -434,7 +434,18 @@ export const useFileExplorer = create<FileExplorerState>((set, get) => ({
         } as TemplateFolder;
         currentFolder.items[folderIndex] = updatedFolder;
 
-        set({ templateData: updatedTemplateData });
+        // Open files inside the folder have IDs (= paths) with the old folder name
+        const oldPrefix = parentPath ? `${parentPath}/${folder.folderName}/` : `${folder.folderName}/`;
+        const newPrefix = parentPath ? `${parentPath}/${newFolderName}/` : `${newFolderName}/`;
+        const remap = (id: string | null) =>
+          id && id.startsWith(oldPrefix) ? newPrefix + id.slice(oldPrefix.length) : id;
+        const { openFiles, activeFileId } = get();
+
+        set({
+          templateData: updatedTemplateData,
+          openFiles: openFiles.map((f) => ({ ...f, id: remap(f.id)! })),
+          activeFileId: remap(activeFileId),
+        });
 
         // Use the passed saveTemplateData function
         await saveTemplateData(updatedTemplateData);
