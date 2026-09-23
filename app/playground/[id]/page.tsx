@@ -89,10 +89,36 @@ const MainPlaygroundPage = () => {
     error: containerError,
     instance,
     writeFileSync,
-    // @ts-ignore
   } = useWebContainer({ templateData });
 
   const lastSyncedContent = useRef<Map<string, string>>(new Map());
+
+  // Live preview: shortly after typing stops, write the edited file into the
+  // WebContainer and tell the preview to reload. Saving (Cmd+S) still stores
+  // the file in the database; this only keeps the running app up to date.
+  const [previewReloadCount, setPreviewReloadCount] = useState(0);
+
+  useEffect(() => {
+    if (!instance || !writeFileSync || !activeFileId) return;
+
+    const file = openFiles.find((f) => f.id === activeFileId);
+    if (!file) return;
+    // Already written (e.g. straight after a save)
+    if (lastSyncedContent.current.get(file.id) === file.content) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        // A file's id is its path inside the project, e.g. "pages/index.html"
+        await writeFileSync(file.id, file.content);
+        lastSyncedContent.current.set(file.id, file.content);
+        setPreviewReloadCount((n) => n + 1);
+      } catch (err) {
+        console.error("Live preview sync failed:", err);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [openFiles, activeFileId, instance, writeFileSync]);
 
   useEffect(() => {
     setPlaygroundId(id);
@@ -505,6 +531,7 @@ const MainPlaygroundPage = () => {
                             isLoading={containerLoading}
                             error={containerError}
                             serverUrl={serverUrl}
+                            reloadSignal={previewReloadCount}
                             forceResetup={false}
                           />
                         </ResizablePanel>

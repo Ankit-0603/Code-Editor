@@ -16,6 +16,8 @@ interface WebContainerPreviewProps {
   error: string | null;
   instance: WebContainer | null;
   writeFileSync: (path: string, content: string) => Promise<void>;
+  /** Increment to reload the preview iframe (the editor bumps it after syncing a file) */
+  reloadSignal?: number;
   forceResetup?: boolean; // Optional prop to force re-setup
 }
 
@@ -33,6 +35,7 @@ const WebContainerPreview = ({
   instance,
   isLoading,
   serverUrl,
+  reloadSignal = 0,
   forceResetup = false,
 }: WebContainerPreviewProps) => {
   const [previewUrl, setPreviewUrl] = useState<string>("");
@@ -204,7 +207,13 @@ const WebContainerPreview = ({
       {previewUrl ? (
         <div className="flex-1 min-h-0">
           <iframe
-            src={previewUrl}
+            // The iframe is cross-origin, so it can't be reloaded directly.
+            // Changing the URL is what makes the browser fetch the page again.
+            src={
+              reloadSignal
+                ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}v=${reloadSignal}`
+                : previewUrl
+            }
             className="w-full h-full border-none"
             title="WebContainer Preview"
           />
