@@ -122,7 +122,9 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
     const [filterType, setFilterType] = useState<string>("all");
     const [autoSave, setAutoSave] = useState(true);
     const [streamResponse, setStreamResponse] = useState(true);
-    const [model, setModel] = useState<string>("gpt-6");
+    // Which model answered last. The server decides this from its environment
+    // (Gemini when GEMINI_API_KEY is set, otherwise the local Ollama model).
+    const [model, setModel] = useState<string>("");
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -193,12 +195,13 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
           })),
           stream: streamResponse,
           mode: chatMode,
-          model,
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.response) {
+        if (data.model) setModel(data.model);
 
         setMessages((prev) => [
           ...prev,
@@ -213,12 +216,18 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
           },
         ]);
       } else {
+        // Show what the server actually said, instead of hiding it behind a
+        // generic message. `details` carries the underlying error.
+        const reason =
+          response.status === 401
+            ? "Please sign in to use the AI."
+            : data?.details || data?.error || `Request failed (${response.status})`;
+
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content:
-              "Sorry, I encountered an error while processing your request. Please try again.",
+            content: `Sorry, I couldn't process that: ${reason}`,
             timestamp: new Date(),
             id: Date.now().toString(),
           },
@@ -385,15 +394,11 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
                                 <div className="flex items-center gap-2">
                                     <div className="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
                                         <span className="text-zinc-500">Model:</span>
-                                        <select
-                                            value={model}
-                                            onChange={(e) => setModel(e.target.value)}
-                                            className="bg-zinc-900/60 border border-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none"
-                                        >
-                                            <option value="gpt-6">gpt-6</option>
-                                            <option value="codellama">codellama</option>
-                                            <option value="llama2">llama2</option>
-                                        </select>
+                                        {/* Read-only: the server chooses the model from its
+                                            environment, so a picker here would be misleading */}
+                                        <span className="bg-zinc-900/60 border border-zinc-800 rounded px-2 py-1 text-zinc-200">
+                                            {model || "—"}
+                                        </span>
                                     </div>
                                     <div className="relative">
                                         <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-zinc-500" />

@@ -29,6 +29,9 @@ export interface GenerateOptions {
 
 export const usingGemini = () => Boolean(GEMINI_API_KEY);
 
+/** Name of the model actually in use, so the UI can show it instead of guessing */
+export const activeModelName = () => (GEMINI_API_KEY ? GEMINI_MODEL : OLLAMA_MODEL);
+
 /** Combines the caller's signal with a timeout, so a hung model can't block a serverless function */
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
   const controller = new AbortController();
