@@ -4,7 +4,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -22,12 +27,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import LoadingStep from "@/modules/playground/components/loader";
-import {PlaygroundEditor} from "@/modules/playground/components/playground-editor";
+import { PlaygroundEditor, type RelatedFile } from "@/modules/playground/components/playground-editor";
 import { TemplateFileTree } from "@/modules/playground/components/playground-explorer";
 import ToggleAI from "@/modules/playground/components/toggle-ai";
 import { useAISuggestions } from "@/modules/playground/hooks/useAISuggestion";
 import { useFileExplorer } from "@/modules/playground/hooks/useFileExplorer";
 import { usePlayground } from "@/modules/playground/hooks/usePlayground";
+import { useEditorSettings } from "@/modules/playground/hooks/useEditorSettings";
+import { EDITOR_THEMES } from "@/modules/playground/lib/editor-themes";
 import { getFileName, updateFileContentAtPath } from "@/modules/playground/lib";
 import type {
   TemplateFile,
@@ -37,10 +44,10 @@ import WebContainerPreview from "@/modules/webcontainers/components/webcontainer
 import { useWebContainer } from "@/modules/webcontainers/hooks/useWebContainer";
 import {
   AlertCircle,
-  Bot,
   FileText,
   FolderOpen,
   Save,
+  Palette,
   Settings,
   X,
 } from "lucide-react";
@@ -48,15 +55,29 @@ import { useParams } from "next/navigation";
 import React, {
   useCallback,
   useEffect,
-  useReducer,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
 
+/** Libraries per template, so AI completions use the right APIs */
+const TEMPLATE_TECHNOLOGIES: Record<string, string[]> = {
+  REACT: ["react", "vite"],
+  NEXTJS: ["nextjs", "react"],
+  EXPRESS: ["nodejs", "express"],
+  VUE: ["vue", "vite"],
+  HONO: ["hono", "nodejs"],
+  ANGULAR: ["angular", "typescript"],
+};
+
+/** How many other open files the AI may read for context */
+const MAX_RELATED_FILES = 3;
+
 const MainPlaygroundPage = () => {
   const { id } = useParams<{ id: string }>();
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const { theme: editorTheme, setTheme: setEditorTheme } = useEditorSettings();
 
   const { playgroundData, templateData, isLoading, error, saveTemplateData } =
     usePlayground(id);
@@ -196,6 +217,30 @@ const MainPlaygroundPage = () => {
   );
 
   const activeFile = openFiles.find((file) => file.id === activeFileId);
+
+  // ---- Context for AI completions --------------------------------------------
+  const technologies = useMemo(
+    () => TEMPLATE_TECHNOLOGIES[String(playgroundData?.template ?? "")] ?? [],
+    [playgroundData?.template]
+  );
+
+  // The other open tabs, so suggestions can use functions and names defined there.
+  // Built from a string key so it only changes when those files actually change,
+  // not on every keystroke in the active file.
+  const relatedFilesKey = JSON.stringify(
+    openFiles
+      .filter((f) => f.id !== activeFileId)
+      .slice(-MAX_RELATED_FILES)
+      .map((f) => [f.id, f.content])
+  );
+  const relatedFiles = useMemo<RelatedFile[]>(
+    () =>
+      (JSON.parse(relatedFilesKey) as [string, string][]).map(([path, content]) => ({
+        path,
+        content,
+      })),
+    [relatedFilesKey]
+  );
   const hasUnsavedChanges = openFiles.some((file) => file.hasUnsavedChanges);
 
   const handleFileSelect = (file: TemplateFile) => {
@@ -428,6 +473,25 @@ const MainPlaygroundPage = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Palette className="mr-2 h-4 w-4" />
+                        Editor Theme
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-48">
+                        <DropdownMenuRadioGroup
+                          value={editorTheme}
+                          onValueChange={setEditorTheme}
+                        >
+                          {EDITOR_THEMES.map((t) => (
+                            <DropdownMenuRadioItem key={t.id} value={t.id}>
+                              {t.label}
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => setIsPreviewVisible(!isPreviewVisible)}
                     >
@@ -461,9 +525,7 @@ const MainPlaygroundPage = () => {
                           >
                             <div className="flex items-center gap-2">
                               <FileText className="h-3 w-3" />
-                              <span>
-                                {file.filename}.{file.fileExtension}
-                              </span>
+                              <span>{getFileName(file)}</span>
                               {file.hasUnsavedChanges && (
                                 <span className="h-2 w-2 rounded-full bg-orange-500" />
                               )}
@@ -503,20 +565,13 @@ const MainPlaygroundPage = () => {
                       <PlaygroundEditor
                         activeFile={activeFile}
                         content={activeFile?.content || ""}
-                        onContentChange={(value) => 
-                          activeFileId && updateFileContent(activeFileId , value)
+                        onContentChange={(value) =>
+                          activeFileId && updateFileContent(activeFileId, value)
                         }
-                        suggestion={aiSuggestions.suggestion}
-                        suggestionLoading={aiSuggestions.isLoading}
-                        suggestionPosition={aiSuggestions.position}
-                        onAcceptSuggestion={(editor , monaco)=>aiSuggestions.acceptSuggestion(editor , monaco)}
-
-                          onRejectSuggestion={(editor) =>
-                          aiSuggestions.rejectSuggestion(editor)
-                        }
-                        onTriggerSuggestion={(type, editor) =>
-                          aiSuggestions.fetchSuggestion(type, editor)
-                        }
+                        aiEnabled={aiSuggestions.isEnabled}
+                        onAILoadingChange={aiSuggestions.setLoading}
+                        technologies={technologies}
+                        relatedFiles={relatedFiles}
                       />
                     </ResizablePanel>
 

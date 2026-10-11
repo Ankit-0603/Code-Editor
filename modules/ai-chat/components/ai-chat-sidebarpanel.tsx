@@ -48,6 +48,9 @@ import {
 import "katex/dist/katex.min.css";
 import Image from "next/image";
 
+/** Remembers the chosen chat model between visits */
+const MODEL_STORAGE_KEY = "onlineide-chat-model";
+
 interface ChatMessage {
     role: "user" | "assistant";
     content: string;
@@ -122,9 +125,54 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
     const [filterType, setFilterType] = useState<string>("all");
     const [autoSave, setAutoSave] = useState(true);
     const [streamResponse, setStreamResponse] = useState(true);
-    // Which model answered last. The server decides this from its environment
-    // (Gemini when GEMINI_API_KEY is set, otherwise the local Ollama model).
+    // Models the server can use right now (from /api/models), and the chosen one
+    const [models, setModels] = useState<{ id: string; label: string }[]>([]);
     const [model, setModel] = useState<string>("");
+    const [modelsError, setModelsError] = useState<string | null>(null);
+
+    // Load the model list the first time the panel opens
+    useEffect(() => {
+        if (!isOpen || models.length > 0) return;
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const res = await fetch("/api/models");
+                const data = await res.json().catch(() => null);
+                if (cancelled) return;
+                if (!res.ok || !Array.isArray(data?.models)) {
+                    setModelsError(data?.error || "Couldn't load models");
+                    return;
+                }
+                setModels(data.models);
+                setModelsError(null);
+
+                // Restore the last choice if it's still available, else the default
+                let saved: string | null = null;
+                try {
+                    saved = localStorage.getItem(MODEL_STORAGE_KEY);
+                } catch {}
+                const ids = data.models.map((m: { id: string }) => m.id);
+                setModel(saved && ids.includes(saved) ? saved : data.defaultModel || ids[0] || "");
+            } catch {
+                if (!cancelled) setModelsError("Couldn't load models");
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, models.length]);
+
+    const handleModelChange = (id: string) => {
+        setModel(id);
+        try {
+            localStorage.setItem(MODEL_STORAGE_KEY, id);
+        } catch {}
+    };
+
+    /** Shows "gpt-oss:20b (local)" instead of the raw id "ollama:gpt-oss:20b" */
+    const modelLabel = (id?: string) => models.find((m) => m.id === id)?.label ?? id;
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -195,14 +243,14 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
           })),
           stream: streamResponse,
           mode: chatMode,
+          // Omitted when nothing is chosen, so the server uses its default
+          model: model || undefined,
         }),
       });
 
       const data = await response.json().catch(() => null);
 
       if (response.ok && data?.response) {
-        if (data.model) setModel(data.model);
-
         setMessages((prev) => [
           ...prev,
           {
@@ -212,7 +260,7 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
             id: Date.now().toString(),
             type: messageType,
             tokens: data.tokens,
-            model: data.model || "AI Assistant",
+            model: modelLabel(data.model) || "AI Assistant",
           },
         ]);
       } else {
@@ -394,11 +442,28 @@ export const AIChatSidePanel: React.FC<AIChatSidePanelProps> = ({
                                 <div className="flex items-center gap-2">
                                     <div className="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
                                         <span className="text-zinc-500">Model:</span>
-                                        {/* Read-only: the server chooses the model from its
-                                            environment, so a picker here would be misleading */}
-                                        <span className="bg-zinc-900/60 border border-zinc-800 rounded px-2 py-1 text-zinc-200">
-                                            {model || "—"}
-                                        </span>
+                                        {models.length > 0 ? (
+                                            <select
+                                                value={model}
+                                                onChange={(e) => handleModelChange(e.target.value)}
+                                                disabled={isLoading}
+                                                aria-label="AI model"
+                                                className="max-w-48 truncate bg-zinc-900/60 border border-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-zinc-600 disabled:opacity-60"
+                                            >
+                                                {models.map((m) => (
+                                                    <option key={m.id} value={m.id}>
+                                                        {m.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <span
+                                                className="bg-zinc-900/60 border border-zinc-800 rounded px-2 py-1 text-zinc-400"
+                                                title={modelsError ?? undefined}
+                                            >
+                                                {modelsError ? "No models" : "Loading…"}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="relative">
                                         <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-zinc-500" />

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import { activeModelName, generateText, type ChatMessage } from "@/lib/ai";
+import { generate, ModelNotAvailableError, type ChatMessage } from "@/lib/ai";
 
 interface ChatRequest {
   message: string;
   history: ChatMessage[]; // the model has no memory, so history is sent each time
+  /** A model id from /api/models, e.g. "ollama:gpt-oss:20b". Optional. */
+  model?: string;
 }
 
 const SYSTEM_PROMPT = `You are a helpful AI coding assistant. You help developers with:
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body: ChatRequest = await req.json();
-    const { message, history = [] } = body;
+    const { message, history = [], model } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -54,9 +56,11 @@ export async function POST(req: NextRequest) {
       { role: "user", content: message },
     ];
 
-    const aiResponse = await generateText({
+    const { text: aiResponse, model: usedModel } = await generate({
       system: SYSTEM_PROMPT,
       messages,
+      // Only ids from /api/models are accepted; anything else is rejected below
+      model: typeof model === "string" && model ? model : undefined,
       temperature: 0.7,
       maxTokens: 1024,
       signal: req.signal, // stop generating if the user closes the chat
@@ -69,12 +73,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       response: aiResponse.trim(),
       // Which model answered, so the panel can display it
-      model: activeModelName(),
+      model: usedModel,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     if (req.signal.aborted) {
       return new NextResponse(null, { status: 499 });
+    }
+
+    if (error instanceof ModelNotAvailableError) {
+      return NextResponse.json(
+        { error: "That model isn't available", details: error.message },
+        { status: 400 }
+      );
     }
 
     console.error("Chat API Error:", error);

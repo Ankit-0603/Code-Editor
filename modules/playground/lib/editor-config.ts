@@ -1,6 +1,8 @@
 import type { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 
+import { EDITOR_THEMES } from "./editor-themes";
+
 export const getEditorLanguage = (fileExtension: string): string => {
   const extension = fileExtension.toLowerCase();
   const languageMap: Record<string, string> = {
@@ -53,8 +55,13 @@ export const getEditorLanguage = (fileExtension: string): string => {
   return languageMap[extension] || "plaintext";
 };
 
-export const configureMonaco = (monaco: Monaco) => {
-  // Define a beautiful modern dark theme
+/**
+ * Registers every theme from editor-themes.ts with Monaco.
+ * Pass this to the <Editor beforeMount> prop, so the themes exist before
+ * the editor first renders and the saved theme applies with no flash.
+ */
+export const registerEditorThemes = (monaco: Monaco) => {
+  // OnlineIDE Dark: the original theme, kept exactly as it was
   monaco.editor.defineTheme("modern-dark", {
     base: "vs-dark",
     inherit: true,
@@ -220,9 +227,18 @@ export const configureMonaco = (monaco: Monaco) => {
     },
   });
 
-  // Set the theme
-  monaco.editor.setTheme("modern-dark");
-  
+
+  // The others come from the registry. Built-in themes (hc-black) have no
+  // `monaco` entry, because Monaco already knows them.
+  for (const theme of EDITOR_THEMES) {
+    if (theme.monaco) monaco.editor.defineTheme(theme.id, theme.monaco);
+  }
+};
+
+export const configureMonaco = (monaco: Monaco) => {
+  // The theme is no longer set here: the <Editor theme> prop applies the
+  // user's saved choice. Setting it here would override that on every mount.
+
   // Error checking. The browser editor can't see the project's node_modules,
   // so every `import express from "express"` would be underlined as
   // "Cannot find module". Those error codes are ignored; real errors still show.

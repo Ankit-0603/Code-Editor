@@ -15,6 +15,8 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
 import type { WebContainer, WebContainerProcess } from "@webcontainer/api";
 import "@xterm/xterm/css/xterm.css";
+import { useEditorSettings } from "@/modules/playground/hooks/useEditorSettings";
+import { getEditorTheme } from "@/modules/playground/lib/editor-themes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, Copy, Trash2, Download } from "lucide-react";
@@ -23,6 +25,7 @@ import { cn } from "@/lib/utils";
 interface TerminalProps {
   webcontainerUrl?: string; // kept for compatibility, currently unused
   className?: string;
+  /** Ignored now: the terminal follows the editor theme. Kept so callers still compile. */
   theme?: "dark" | "light";
   webContainerInstance?: WebContainer | null;
 }
@@ -86,7 +89,15 @@ const TERMINAL_THEMES: Record<"dark" | "light", ITheme> = {
 const PROMPT = "$ ";
 
 const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
-  ({ className, theme = "dark", webContainerInstance }, ref) => {
+  ({ className, webContainerInstance }, ref) => {
+    // Follow the editor theme, so the terminal and code panel match
+    const editorThemeId = useEditorSettings((s) => s.theme);
+    const xtermTheme = React.useMemo<ITheme>(() => {
+      const def = getEditorTheme(editorThemeId);
+      // Full ANSI palette from the light/dark base, with the theme's own colors on top
+      return { ...TERMINAL_THEMES[def.kind], ...def.terminal };
+    }, [editorThemeId]);
+
     const containerRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
@@ -109,7 +120,7 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
     // Latest values in refs, so the xterm input handler never sees stale ones
     // and the terminal never has to be re-created when they change.
     const instanceRef = useRef<WebContainer | null>(webContainerInstance ?? null);
-    const themeRef = useRef(theme);
+    const themeRef = useRef(xtermTheme);
     useEffect(() => {
       instanceRef.current = webContainerInstance ?? null;
     }, [webContainerInstance]);
@@ -330,7 +341,7 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
           fontSize: 14,
           lineHeight: 1.2,
           letterSpacing: 0,
-          theme: TERMINAL_THEMES[themeRef.current],
+          theme: themeRef.current,
           allowTransparency: false,
           convertEol: true,
           scrollback: 1000,
@@ -392,11 +403,11 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
 
     // Apply theme changes without re-creating the terminal
     useEffect(() => {
-      themeRef.current = theme;
+      themeRef.current = xtermTheme;
       if (term.current) {
-        term.current.options.theme = TERMINAL_THEMES[theme];
+        term.current.options.theme = xtermTheme;
       }
-    }, [theme, isReady]);
+    }, [xtermTheme, isReady]);
 
     // Announce the connection once both the terminal and the container exist
     useEffect(() => {
@@ -525,7 +536,7 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
           <div
             ref={containerRef}
             className="absolute inset-0 p-2"
-            style={{ background: TERMINAL_THEMES[theme].background }}
+            style={{ background: xtermTheme.background }}
           />
         </div>
       </div>
